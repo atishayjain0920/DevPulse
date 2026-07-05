@@ -1,0 +1,569 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum PullRequestState {
+  OPEN
+  CLOSED
+  MERGED
+  DRAFT
+}
+
+enum RiskSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model User {
+  id                  String                @id @default(uuid())
+  githubId            String?               @unique
+  username            String                @unique
+  displayName         String
+  email               String?               @unique
+  avatarUrl           String?
+  bio                 String?
+  company             String?
+  location            String?
+  website             String?
+  roleId              String
+  organizationId      String?
+  isMFAEnabled        Boolean               @default(false)
+  isEmailVerified     Boolean               @default(false)
+  accountStatus       AccountStatus         @default(ACTIVE)
+  lastLogin           DateTime?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  role                Role                  @relation(fields: [roleId], references: [id])
+  organization        Organization?         @relation(fields: [organizationId], references: [id])
+  githubAccounts      GitHubAccount[]
+  commits             Commit[]
+  pullRequests        PullRequest[]
+  reviews             PullRequestReview[]
+  developerProfile    DeveloperProfile?
+  achievements        Achievement[]
+  notifications       Notification[]
+  aiSummaries         AISummary[]
+  aiConversations     AIConversation[]
+  dashboardPreference DashboardPreference?
+  userSettings        UserSettings?
+  sessions            UserSession[]
+  refreshTokens       RefreshToken[]
+  trustedDevices      TrustedDevice[]
+  auditLogs           AuditLog[]
+  exportJobs          ExportJob[]
+  searchHistory       SearchHistory[]
+
+  @@index([organizationId])
+  @@index([roleId])
+}
+
+model Role {
+  id          String @id @default(uuid())
+  name        String @unique
+  description String
+  permissions Json
+  users       User[]
+}
+
+model Organization {
+  id                   String       @id @default(uuid())
+  githubOrganizationId String?      @unique
+  name                 String
+  avatar               String?
+  description          String?
+  website              String?
+  createdAt            DateTime     @default(now())
+  users                User[]
+  repositories         Repository[]
+}
+
+model GitHubAccount {
+  id                    String   @id @default(uuid())
+  userId                String
+  githubUserId          String
+  accessTokenEncrypted  String
+  refreshTokenEncrypted String?
+  tokenExpiresAt        DateTime?
+  scopes                String[]
+  connectedAt           DateTime @default(now())
+  lastSync              DateTime?
+  user                  User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([githubUserId])
+}
+
+model Repository {
+  id                 String             @id @default(uuid())
+  githubRepositoryId String             @unique
+  organizationId     String?
+  ownerId            String?
+  name               String
+  fullName           String             @unique
+  description        String?
+  visibility         String
+  defaultBranch      String
+  language           String?
+  languages          Json?
+  topics             String[]           @default([])
+  stars              Int                @default(0)
+  forks              Int                @default(0)
+  watchers           Int                @default(0)
+  openIssues         Int                @default(0)
+  size               Int                @default(0)
+  createdAtGitHub    DateTime?
+  lastPush           DateTime?
+  archived           Boolean            @default(false)
+  disabled           Boolean            @default(false)
+  syncedAt           DateTime?
+  organization       Organization?      @relation(fields: [organizationId], references: [id])
+  branches           Branch[]
+  commits            Commit[]
+  contributors       Contributor[]
+  issues             Issue[]
+  pullRequests       PullRequest[]
+  releases           Release[]
+  workflows          Workflow[]
+  health             RepositoryHealth[]
+  risks              RepositoryRisk[]
+  webhookEvents      WebhookEvent[]
+  syncJobs           SyncJob[]
+
+  @@index([organizationId])
+  @@index([language])
+}
+
+model Issue {
+  id                 String     @id @default(uuid())
+  repositoryId       String
+  githubIssueNumber  Int
+  title              String
+  body               String?
+  state              String
+  authorLogin        String?
+  labels             String[]
+  comments           Int        @default(0)
+  createdAtGitHub    DateTime
+  updatedAtGitHub    DateTime?
+  closedAt           DateTime?
+  url                String?
+  repository         Repository @relation(fields: [repositoryId], references: [id])
+
+  @@unique([repositoryId, githubIssueNumber])
+  @@index([repositoryId, state])
+  @@index([createdAtGitHub])
+}
+
+model Release {
+  id               String     @id @default(uuid())
+  repositoryId     String
+  githubReleaseId  String
+  tagName          String
+  name             String?
+  body             String?
+  draft            Boolean    @default(false)
+  prerelease       Boolean    @default(false)
+  publishedAt      DateTime?
+  createdAtGitHub  DateTime?
+  url              String?
+  repository       Repository @relation(fields: [repositoryId], references: [id])
+
+  @@unique([repositoryId, githubReleaseId])
+  @@index([repositoryId, publishedAt])
+}
+
+model Branch {
+  id               String     @id @default(uuid())
+  repositoryId     String
+  githubBranchName String
+  isDefault        Boolean    @default(false)
+  latestCommitSHA  String?
+  createdAt        DateTime   @default(now())
+  repository       Repository @relation(fields: [repositoryId], references: [id])
+
+  @@unique([repositoryId, githubBranchName])
+}
+
+model Commit {
+  id           String     @id @default(uuid())
+  repositoryId String
+  authorId     String?
+  commitSHA    String     @unique
+  message      String
+  additions    Int        @default(0)
+  deletions    Int        @default(0)
+  totalChanges Int        @default(0)
+  filesChanged Int        @default(0)
+  commitDate   DateTime
+  pushedDate   DateTime?
+  branch       String?
+  url          String?
+  repository   Repository @relation(fields: [repositoryId], references: [id])
+  author       User?      @relation(fields: [authorId], references: [id])
+
+  @@index([commitDate])
+  @@index([repositoryId, commitDate])
+  @@index([authorId, commitDate])
+}
+
+model Contributor {
+  id                String     @id @default(uuid())
+  repositoryId      String
+  userId            String?
+  githubUserId      String?
+  login             String?
+  totalCommits      Int        @default(0)
+  totalAdditions    Int        @default(0)
+  totalDeletions    Int        @default(0)
+  codeChurn         Int        @default(0)
+  firstContribution DateTime?
+  lastContribution  DateTime?
+  repository        Repository @relation(fields: [repositoryId], references: [id])
+
+  @@unique([repositoryId, userId])
+  @@unique([repositoryId, githubUserId])
+}
+
+model PullRequest {
+  id              String              @id @default(uuid())
+  repositoryId    String
+  authorId        String?
+  githubPRNumber  Int
+  title           String
+  description     String?
+  state           PullRequestState
+  createdAtGitHub DateTime
+  mergedAt        DateTime?
+  closedAt        DateTime?
+  reviewTime      Int?
+  mergeTime       Int?
+  comments        Int                 @default(0)
+  additions       Int                 @default(0)
+  deletions       Int                 @default(0)
+  changedFiles    Int                 @default(0)
+  url             String?
+  repository      Repository          @relation(fields: [repositoryId], references: [id])
+  author          User?               @relation(fields: [authorId], references: [id])
+  reviews         PullRequestReview[]
+
+  @@unique([repositoryId, githubPRNumber])
+  @@index([state])
+  @@index([mergedAt])
+  @@index([repositoryId, state])
+}
+
+model PullRequestReview {
+  id             String      @id @default(uuid())
+  pullRequestId  String
+  reviewerId     String?
+  reviewState    String
+  submittedAt    DateTime
+  comments       Int         @default(0)
+  reviewDuration Int?
+  pullRequest    PullRequest @relation(fields: [pullRequestId], references: [id])
+  reviewer       User?       @relation(fields: [reviewerId], references: [id])
+}
+
+model Workflow {
+  id               String        @id @default(uuid())
+  repositoryId     String
+  githubWorkflowId String
+  name             String
+  path             String
+  state            String
+  createdAt        DateTime      @default(now())
+  repository       Repository    @relation(fields: [repositoryId], references: [id])
+  runs             WorkflowRun[]
+
+  @@unique([repositoryId, githubWorkflowId])
+}
+
+model WorkflowRun {
+  id          String       @id @default(uuid())
+  workflowId  String
+  status      String
+  conclusion  String?
+  duration    Int?
+  startedAt   DateTime
+  completedAt DateTime?
+  branch      String?
+  commitSHA   String?
+  workflow    Workflow     @relation(fields: [workflowId], references: [id])
+  deployments Deployment[]
+
+  @@index([status])
+  @@index([startedAt])
+}
+
+model Deployment {
+  id                 String      @id @default(uuid())
+  workflowRunId      String
+  environment        String
+  deploymentStatus   String
+  deploymentDuration Int?
+  deployedAt         DateTime
+  workflowRun        WorkflowRun @relation(fields: [workflowRunId], references: [id])
+}
+
+model RepositoryHealth {
+  id              String     @id @default(uuid())
+  repositoryId    String
+  overallScore    Int
+  activityScore   Int
+  reviewScore     Int
+  buildScore      Int
+  deploymentScore Int
+  codeQualityScore Int
+  riskLevel       String
+  calculatedAt    DateTime   @default(now())
+  repository      Repository @relation(fields: [repositoryId], references: [id])
+
+  @@index([repositoryId, calculatedAt])
+}
+
+model RepositoryRisk {
+  id             String       @id @default(uuid())
+  repositoryId   String
+  riskType       String
+  severity       RiskSeverity
+  title          String
+  description    String
+  recommendation String
+  detectedAt     DateTime     @default(now())
+  resolvedAt     DateTime?
+  status         String       @default("open")
+  repository     Repository   @relation(fields: [repositoryId], references: [id])
+
+  @@index([repositoryId, status])
+  @@index([severity])
+}
+
+model DeveloperProfile {
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  productivityScore   Int      @default(0)
+  commitStreak        Int      @default(0)
+  longestCommitStreak Int      @default(0)
+  totalRepositories   Int      @default(0)
+  totalCommits        Int      @default(0)
+  totalPRs            Int      @default(0)
+  totalMergedPRs      Int      @default(0)
+  totalReviews        Int      @default(0)
+  totalBuilds         Int      @default(0)
+  buildSuccessRate    Int      @default(0)
+  achievementsCount   Int      @default(0)
+  lastCalculated      DateTime @default(now())
+  user                User     @relation(fields: [userId], references: [id])
+}
+
+model Achievement {
+  id              String   @id @default(uuid())
+  userId          String
+  achievementType String
+  title           String
+  description     String
+  icon            String
+  earnedAt        DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id])
+}
+
+model Notification {
+  id               String    @id @default(uuid())
+  userId           String
+  notificationType String
+  title            String
+  message          String
+  priority         String
+  isRead           Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  deletedAt        DateTime?
+  user             User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, isRead])
+}
+
+model AISummary {
+  id          String   @id @default(uuid())
+  userId      String
+  summaryType String
+  content     String
+  generatedAt DateTime @default(now())
+  modelName   String
+  confidence  Float
+  user        User     @relation(fields: [userId], references: [id])
+}
+
+model AIConversation {
+  id        String      @id @default(uuid())
+  userId    String
+  title     String
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  user      User        @relation(fields: [userId], references: [id])
+  messages  AIMessage[]
+}
+
+model AIMessage {
+  id             String         @id @default(uuid())
+  conversationId String
+  sender         String
+  content        String
+  metadata       Json?
+  createdAt      DateTime       @default(now())
+  conversation   AIConversation @relation(fields: [conversationId], references: [id])
+}
+
+model DashboardPreference {
+  id                 String   @id @default(uuid())
+  userId             String   @unique
+  layout             Json
+  pinnedRepositories Json
+  selectedWidgets    Json
+  theme              String
+  updatedAt          DateTime @updatedAt
+  deletedAt          DateTime?
+  user               User     @relation(fields: [userId], references: [id])
+}
+
+model UserSettings {
+  id                   String   @id @default(uuid())
+  userId               String   @unique
+  theme                String   @default("system")
+  syncFrequencyMinutes Int      @default(15)
+  webhooksEnabled      Boolean  @default(true)
+  notifications        Json
+  aiPreferences        Json
+  dashboard            Json
+  profilePreferences   Json
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  user                 User     @relation(fields: [userId], references: [id])
+}
+
+model UserSession {
+  id              String   @id @default(uuid())
+  userId          String
+  deviceName      String?
+  browser         String?
+  operatingSystem String?
+  ipAddressHash   String?
+  userAgent       String?
+  lastActivity    DateTime @default(now())
+  expiresAt       DateTime
+  isRevoked       Boolean  @default(false)
+  user            User     @relation(fields: [userId], references: [id])
+}
+
+model RefreshToken {
+  id             String    @id @default(uuid())
+  userId         String
+  tokenHash      String    @unique
+  familyId       String
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime
+  rotatedAt      DateTime?
+  revokedAt      DateTime?
+  replacedByHash String?
+  user           User      @relation(fields: [userId], references: [id])
+
+  @@index([userId, revokedAt])
+  @@index([familyId])
+}
+
+model TrustedDevice {
+  id                String   @id @default(uuid())
+  userId            String
+  deviceFingerprint String
+  deviceName        String
+  firstSeen         DateTime @default(now())
+  lastUsed          DateTime @default(now())
+  trusted           Boolean  @default(false)
+  user              User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, deviceFingerprint])
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  userId        String?
+  action        String
+  entity        String
+  entityId      String?
+  metadata      Json?
+  ipAddressHash String?
+  createdAt     DateTime @default(now())
+  user          User?    @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@index([userId])
+}
+
+model WebhookEvent {
+  id           String      @id @default(uuid())
+  eventType    String
+  deliveryId   String      @unique
+  repositoryId String?
+  payloadHash  String
+  status       String
+  processedAt  DateTime?
+  repository   Repository? @relation(fields: [repositoryId], references: [id])
+}
+
+model SyncJob {
+  id             String      @id @default(uuid())
+  repositoryId   String?
+  jobType        String
+  status         String
+  attempts       Int         @default(0)
+  lastError      String?
+  scheduledAt    DateTime    @default(now())
+  startedAt      DateTime?
+  completedAt    DateTime?
+  payload        Json?
+  repository     Repository? @relation(fields: [repositoryId], references: [id])
+
+  @@index([repositoryId, status])
+  @@index([jobType, status])
+}
+
+model ExportJob {
+  id           String    @id @default(uuid())
+  userId       String
+  reportType   String
+  format       String
+  status       String
+  fileLocation String?
+  requestedAt  DateTime  @default(now())
+  completedAt  DateTime?
+  user         User      @relation(fields: [userId], references: [id])
+}
+
+model SearchHistory {
+  id         String    @id @default(uuid())
+  userId     String
+  query      String
+  filters    Json?
+  searchedAt DateTime  @default(now())
+  deletedAt  DateTime?
+  user       User      @relation(fields: [userId], references: [id])
+}
+
+model SystemSettings {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  updatedAt DateTime @updatedAt
+}

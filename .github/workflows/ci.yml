@@ -1,0 +1,27 @@
+name: DevPulse CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: devpulse/package-lock.json
+      - run: npm install
+        working-directory: devpulse
+      - run: npm run typecheck
+        working-directory: devpulse
+      - run: npm run lint
+        working-directory: devpulse
+      - run: npm run test
+        working-directory: devpulse
+      - run: npm run build
+        working-directory: devpulse

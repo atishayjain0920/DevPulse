@@ -1,0 +1,34 @@
+import { Router } from "express";
+import { aiRoutes } from "./ai.routes.js";
+import { analyticsRoutes } from "./analytics.routes.js";
+import { authRoutes } from "./auth.routes.js";
+import { dashboardRoutes } from "./dashboard.routes.js";
+import { notificationRoutes } from "./notification.routes.js";
+import { profileRoutes } from "./profile.routes.js";
+import { pullRequestRoutes } from "./pullRequest.routes.js";
+import { reportRoutes } from "./report.routes.js";
+import { repositoryRoutes } from "./repository.routes.js";
+import { searchRoutes } from "./search.routes.js";
+import { securityRoutes } from "./security.routes.js";
+import { settingsRoutes } from "./settings.routes.js";
+import { userRoutes } from "./user.routes.js";
+import { webhookRoutes } from "./webhook.routes.js";
+import { workflowRoutes } from "./workflow.routes.js";
+
+export const apiRoutes = Router();
+
+apiRoutes.use("/auth", authRoutes);
+apiRoutes.use("/users", userRoutes);
+apiRoutes.use("/repositories", repositoryRoutes);
+apiRoutes.use("/analytics", analyticsRoutes);
+apiRoutes.use("/pull-requests", pullRequestRoutes);
+apiRoutes.use("/workflows", workflowRoutes);
+apiRoutes.use("/dashboard", dashboardRoutes);
+apiRoutes.use("/profile", profileRoutes);
+apiRoutes.use("/ai", aiRoutes);
+apiRoutes.use("/notifications", notificationRoutes);
+apiRoutes.use("/reports", reportRoutes);
+apiRoutes.use("/search", searchRoutes);
+apiRoutes.use("/security", securityRoutes);
+apiRoutes.use("/settings", settingsRoutes);
+apiRoutes.use("/webhooks", webhookRoutes);
