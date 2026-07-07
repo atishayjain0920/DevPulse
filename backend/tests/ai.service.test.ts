@@ -2,11 +2,23 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "../src/shared/prisma.js";
 import { aiService } from "../src/modules/ai/ai.service.js";
 
-const dbDouble = {
-  repository: { count: async () => 0 },
-  commit: { count: async () => 0 },
-  pullRequest: { count: async () => 0 }
+const emptyCounts = {
+  repository: async () => 0,
+  commit: async () => 0,
+  pullRequest: async () => 0
 };
+
+const dbDouble = {
+  repository: { count: emptyCounts.repository },
+  commit: { count: emptyCounts.commit },
+  pullRequest: { count: emptyCounts.pullRequest }
+};
+
+function resetDbDouble() {
+  dbDouble.repository.count = emptyCounts.repository;
+  dbDouble.commit.count = emptyCounts.commit;
+  dbDouble.pullRequest.count = emptyCounts.pullRequest;
+}
 
 function installDbDouble() {
   Object.assign(prisma.repository, dbDouble.repository);
@@ -16,6 +28,7 @@ function installDbDouble() {
 
 describe("aiService", () => {
   beforeEach(() => {
+    resetDbDouble();
     installDbDouble();
   });
 

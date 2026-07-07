@@ -7,32 +7,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum AccountStatus {
-  ACTIVE
-  SUSPENDED
-  DELETED
-}
-
-enum PullRequestState {
-  OPEN
-  CLOSED
-  MERGED
-  DRAFT
-}
-
-enum RiskSeverity {
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
-}
-
 model User {
-  id                  String                @id @default(uuid())
-  githubId            String?               @unique
-  username            String                @unique
+  id                  String               @id @default(uuid())
+  githubId            String?              @unique
+  username            String               @unique
   displayName         String
-  email               String?               @unique
+  email               String?              @unique
   avatarUrl           String?
   bio                 String?
   company             String?
@@ -40,31 +20,31 @@ model User {
   website             String?
   roleId              String
   organizationId      String?
-  isMFAEnabled        Boolean               @default(false)
-  isEmailVerified     Boolean               @default(false)
-  accountStatus       AccountStatus         @default(ACTIVE)
+  isMFAEnabled        Boolean              @default(false)
+  isEmailVerified     Boolean              @default(false)
+  accountStatus       AccountStatus        @default(ACTIVE)
   lastLogin           DateTime?
-  createdAt           DateTime              @default(now())
-  updatedAt           DateTime              @updatedAt
-  role                Role                  @relation(fields: [roleId], references: [id])
-  organization        Organization?         @relation(fields: [organizationId], references: [id])
-  githubAccounts      GitHubAccount[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  aiConversations     AIConversation[]
+  aiSummaries         AISummary[]
+  achievements        Achievement[]
+  auditLogs           AuditLog[]
   commits             Commit[]
+  dashboardPreference DashboardPreference?
+  developerProfile    DeveloperProfile?
+  exportJobs          ExportJob[]
+  githubAccounts      GitHubAccount[]
+  notifications       Notification[]
   pullRequests        PullRequest[]
   reviews             PullRequestReview[]
-  developerProfile    DeveloperProfile?
-  achievements        Achievement[]
-  notifications       Notification[]
-  aiSummaries         AISummary[]
-  aiConversations     AIConversation[]
-  dashboardPreference DashboardPreference?
-  userSettings        UserSettings?
-  sessions            UserSession[]
   refreshTokens       RefreshToken[]
-  trustedDevices      TrustedDevice[]
-  auditLogs           AuditLog[]
-  exportJobs          ExportJob[]
   searchHistory       SearchHistory[]
+  trustedDevices      TrustedDevice[]
+  organization        Organization?        @relation(fields: [organizationId], references: [id])
+  role                Role                 @relation(fields: [roleId], references: [id])
+  sessions            UserSession[]
+  userSettings        UserSettings?
 
   @@index([organizationId])
   @@index([roleId])
@@ -86,21 +66,21 @@ model Organization {
   description          String?
   website              String?
   createdAt            DateTime     @default(now())
-  users                User[]
   repositories         Repository[]
+  users                User[]
 }
 
 model GitHubAccount {
-  id                    String   @id @default(uuid())
+  id                    String    @id @default(uuid())
   userId                String
   githubUserId          String
   accessTokenEncrypted  String
   refreshTokenEncrypted String?
   tokenExpiresAt        DateTime?
   scopes                String[]
-  connectedAt           DateTime @default(now())
+  connectedAt           DateTime  @default(now())
   lastSync              DateTime?
-  user                  User     @relation(fields: [userId], references: [id])
+  user                  User      @relation(fields: [userId], references: [id])
 
   @@index([userId])
   @@index([githubUserId])
@@ -129,38 +109,38 @@ model Repository {
   archived           Boolean            @default(false)
   disabled           Boolean            @default(false)
   syncedAt           DateTime?
-  organization       Organization?      @relation(fields: [organizationId], references: [id])
   branches           Branch[]
   commits            Commit[]
   contributors       Contributor[]
   issues             Issue[]
   pullRequests       PullRequest[]
   releases           Release[]
-  workflows          Workflow[]
+  organization       Organization?      @relation(fields: [organizationId], references: [id])
   health             RepositoryHealth[]
   risks              RepositoryRisk[]
-  webhookEvents      WebhookEvent[]
   syncJobs           SyncJob[]
+  webhookEvents      WebhookEvent[]
+  workflows          Workflow[]
 
   @@index([organizationId])
   @@index([language])
 }
 
 model Issue {
-  id                 String     @id @default(uuid())
-  repositoryId       String
-  githubIssueNumber  Int
-  title              String
-  body               String?
-  state              String
-  authorLogin        String?
-  labels             String[]
-  comments           Int        @default(0)
-  createdAtGitHub    DateTime
-  updatedAtGitHub    DateTime?
-  closedAt           DateTime?
-  url                String?
-  repository         Repository @relation(fields: [repositoryId], references: [id])
+  id                String     @id @default(uuid())
+  repositoryId      String
+  githubIssueNumber Int
+  title             String
+  body              String?
+  state             String
+  authorLogin       String?
+  labels            String[]
+  comments          Int        @default(0)
+  createdAtGitHub   DateTime
+  updatedAtGitHub   DateTime?
+  closedAt          DateTime?
+  url               String?
+  repository        Repository @relation(fields: [repositoryId], references: [id])
 
   @@unique([repositoryId, githubIssueNumber])
   @@index([repositoryId, state])
@@ -168,18 +148,18 @@ model Issue {
 }
 
 model Release {
-  id               String     @id @default(uuid())
-  repositoryId     String
-  githubReleaseId  String
-  tagName          String
-  name             String?
-  body             String?
-  draft            Boolean    @default(false)
-  prerelease       Boolean    @default(false)
-  publishedAt      DateTime?
-  createdAtGitHub  DateTime?
-  url              String?
-  repository       Repository @relation(fields: [repositoryId], references: [id])
+  id              String     @id @default(uuid())
+  repositoryId    String
+  githubReleaseId String
+  tagName         String
+  name            String?
+  body            String?
+  draft           Boolean    @default(false)
+  prerelease      Boolean    @default(false)
+  publishedAt     DateTime?
+  createdAtGitHub DateTime?
+  url             String?
+  repository      Repository @relation(fields: [repositoryId], references: [id])
 
   @@unique([repositoryId, githubReleaseId])
   @@index([repositoryId, publishedAt])
@@ -211,8 +191,8 @@ model Commit {
   pushedDate   DateTime?
   branch       String?
   url          String?
-  repository   Repository @relation(fields: [repositoryId], references: [id])
   author       User?      @relation(fields: [authorId], references: [id])
+  repository   Repository @relation(fields: [repositoryId], references: [id])
 
   @@index([commitDate])
   @@index([repositoryId, commitDate])
@@ -255,8 +235,8 @@ model PullRequest {
   deletions       Int                 @default(0)
   changedFiles    Int                 @default(0)
   url             String?
-  repository      Repository          @relation(fields: [repositoryId], references: [id])
   author          User?               @relation(fields: [authorId], references: [id])
+  repository      Repository          @relation(fields: [repositoryId], references: [id])
   reviews         PullRequestReview[]
 
   @@unique([repositoryId, githubPRNumber])
@@ -301,8 +281,8 @@ model WorkflowRun {
   completedAt DateTime?
   branch      String?
   commitSHA   String?
-  workflow    Workflow     @relation(fields: [workflowId], references: [id])
   deployments Deployment[]
+  workflow    Workflow     @relation(fields: [workflowId], references: [id])
 
   @@index([status])
   @@index([startedAt])
@@ -319,17 +299,17 @@ model Deployment {
 }
 
 model RepositoryHealth {
-  id              String     @id @default(uuid())
-  repositoryId    String
-  overallScore    Int
-  activityScore   Int
-  reviewScore     Int
-  buildScore      Int
-  deploymentScore Int
+  id               String     @id @default(uuid())
+  repositoryId     String
+  overallScore     Int
+  activityScore    Int
+  reviewScore      Int
+  buildScore       Int
+  deploymentScore  Int
   codeQualityScore Int
-  riskLevel       String
-  calculatedAt    DateTime   @default(now())
-  repository      Repository @relation(fields: [repositoryId], references: [id])
+  riskLevel        String
+  calculatedAt     DateTime   @default(now())
+  repository       Repository @relation(fields: [repositoryId], references: [id])
 
   @@index([repositoryId, calculatedAt])
 }
@@ -427,15 +407,15 @@ model AIMessage {
 }
 
 model DashboardPreference {
-  id                 String   @id @default(uuid())
-  userId             String   @unique
+  id                 String    @id @default(uuid())
+  userId             String    @unique
   layout             Json
   pinnedRepositories Json
   selectedWidgets    Json
   theme              String
-  updatedAt          DateTime @updatedAt
+  updatedAt          DateTime  @updatedAt
   deletedAt          DateTime?
-  user               User     @relation(fields: [userId], references: [id])
+  user               User      @relation(fields: [userId], references: [id])
 }
 
 model UserSettings {
@@ -523,17 +503,17 @@ model WebhookEvent {
 }
 
 model SyncJob {
-  id             String      @id @default(uuid())
-  repositoryId   String?
-  jobType        String
-  status         String
-  attempts       Int         @default(0)
-  lastError      String?
-  scheduledAt    DateTime    @default(now())
-  startedAt      DateTime?
-  completedAt    DateTime?
-  payload        Json?
-  repository     Repository? @relation(fields: [repositoryId], references: [id])
+  id           String      @id @default(uuid())
+  repositoryId String?
+  jobType      String
+  status       String
+  attempts     Int         @default(0)
+  lastError    String?
+  scheduledAt  DateTime    @default(now())
+  startedAt    DateTime?
+  completedAt  DateTime?
+  payload      Json?
+  repository   Repository? @relation(fields: [repositoryId], references: [id])
 
   @@index([repositoryId, status])
   @@index([jobType, status])
@@ -566,4 +546,24 @@ model SystemSettings {
   key       String   @unique
   value     Json
   updatedAt DateTime @updatedAt
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum PullRequestState {
+  OPEN
+  CLOSED
+  MERGED
+  DRAFT
+}
+
+enum RiskSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
 }

@@ -1,3 +1,4 @@
+import { GoogleGenAI } from "@google/genai";
 import { env } from "../../config/env.js";
 import { logger } from "../../config/logger.js";
 import { AppError } from "../../shared/errors.js";
@@ -113,7 +114,17 @@ export class AiService {
     }
 
     const context = await this.buildContext(userId);
+    logger.info({
+      repositories: context.repositories.length,
+      commits: context.commits.length,
+      prs: context.pullRequests.length,
+      risks: context.risks.length,
+      workflows: context.workflowRuns.length
+    }, "AI Context");
     const providerAnswer = await this.askProvider(question, context);
+    logger.info({
+      answer: providerAnswer
+    }, "Gemini Response");
     await this.storeConversation(question, providerAnswer, userId);
 
     return {
@@ -202,42 +213,46 @@ export class AiService {
     };
   }
 
-  private async askProvider(question: string, context: Awaited<ReturnType<AiService["buildContext"]>>): Promise<string> {
+  private async askProvider(
+    question: string,
+    context: Awaited<ReturnType<AiService["buildContext"]>>
+  ): Promise<string> {
     try {
-      const response = await fetch(`${env.AI_BASE_URL!.replace(/\/$/, "")}/chat/completions`, {
-        method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${env.AI_API_KEY}` },
-        body: JSON.stringify({
-          model: env.AI_MODEL,
-          messages: [
-            {
-              role: "system",
-              content: "You are DevPulse's Senior Engineering Intelligence Assistant. Use only the supplied DevPulse database context. Be direct, operational, and explicit about uncertainty. Do not invent repositories, metrics, people, dates, or incidents."
-            },
-            {
-              role: "user",
-              content: JSON.stringify({ question, context })
-            }
-          ],
-          temperature: 0.2
-        })
+      const ai = new GoogleGenAI({
+        apiKey: env.AI_API_KEY!
       });
-      const bodyText = await response.text();
-      if (!response.ok) {
-        logger.error({ status: response.status, body: bodyText }, "AI provider request failed");
-        throw new AppError(502, "AI_PROVIDER_FAILED", "AI provider request failed.", { status: response.status, body: bodyText });
-      }
-      const data = JSON.parse(bodyText) as { choices?: Array<{ message?: { content?: string } }> };
-      const answer = data.choices?.[0]?.message?.content?.trim();
-      if (!answer) {
-        logger.error({ status: response.status, body: bodyText }, "AI provider returned an empty response");
-        throw new AppError(502, "AI_PROVIDER_EMPTY_RESPONSE", "AI provider returned an empty response.");
-      }
-      return answer;
+
+      const prompt = `
+  You are DevPulse AI.
+
+  Use ONLY the supplied DevPulse data.
+
+  If information is unavailable, say so.
+
+  Context:
+
+  ${JSON.stringify(context, null, 2)}
+
+  Question:
+
+  ${question}
+  `;
+
+      const response = await ai.models.generateContent({
+        model: env.AI_MODEL,
+        contents: prompt
+      });
+
+      return response.text ?? "No response generated.";
+
     } catch (error) {
-      if (error instanceof AppError) throw error;
-      logger.error({ error }, "AI provider request threw an exception");
-      throw new AppError(502, "AI_PROVIDER_EXCEPTION", "AI provider request failed with an exception.");
+      logger.error({ error }, "Gemini request failed");
+
+      throw new AppError(
+        502,
+        "AI_PROVIDER_FAILED",
+        "Gemini request failed."
+      );
     }
   }
 
