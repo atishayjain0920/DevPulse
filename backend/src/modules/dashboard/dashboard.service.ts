@@ -3,7 +3,7 @@ import { analyticsService } from "../analytics/analytics.service.js";
 
 export class DashboardService {
   async developerDashboard(userId: string) {
-    const [commitSummary, prStats, workflowStats, repositories, repositoryCount, unreadNotifications, recentActivity, aiSummary] = await Promise.all([
+    const [commitSummary, prStats, workflowStats, repositories, repositoryCount, unreadNotifications, recentActivity, aiSummary, kpis] = await Promise.all([
       analyticsService.getCommitSummary(),
       analyticsService.getPullRequestStatistics(),
       analyticsService.getWorkflowStatistics(),
@@ -11,7 +11,8 @@ export class DashboardService {
       prisma.repository.count(),
       prisma.notification.count({ where: { userId, isRead: false, deletedAt: null } }),
       prisma.commit.findMany({ where: { authorId: userId }, orderBy: { commitDate: "desc" }, take: 6, include: { repository: true } }),
-      prisma.aISummary.findFirst({ where: { userId }, orderBy: { generatedAt: "desc" } })
+      prisma.aISummary.findFirst({ where: { userId }, orderBy: { generatedAt: "desc" } }),
+      analyticsService.getEngineeringKpis(userId)
     ]);
     const languageRows = await prisma.repository.groupBy({ by: ["language"], _count: { language: true }, where: { language: { not: null } } });
 
@@ -25,10 +26,12 @@ export class DashboardService {
         successfulBuilds: workflowStats.successful,
         buildSuccessRate: workflowStats.buildSuccessRate,
         deploymentFrequency: workflowStats.deploymentFrequency,
-        repositoryHealth: (await analyticsService.getEngineeringKpis(userId)).repositoryHealth,
+        repositoryHealth: kpis.repositoryHealth,
         productivityScore: await analyticsService.calculateProductivityScore(userId),
         notifications: unreadNotifications,
-        pendingReviews: prStats.pendingReviews
+        pendingReviews: prStats.pendingReviews,
+        activeContributors: kpis.activeContributors,
+        cycleTimeHours: prStats.averageMergeTime
       },
       charts: {
         commitTrend: await analyticsService.getCommitTrend(),

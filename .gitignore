@@ -6,3 +6,4 @@ coverage/
 *.log
 backend/generated/
 frontend/.vite/
+frontend-old

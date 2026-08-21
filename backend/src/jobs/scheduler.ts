@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { Queue } from "bullmq";
+import { Redis } from "ioredis";
 import { env } from "../config/env.js";
 import { logger } from "../config/logger.js";
 import { prisma } from "../shared/prisma.js";
@@ -21,12 +22,25 @@ type JobName =
   | "sessions.cleanup"
   | "analytics.cache.refresh";
 
+let schedulerErrorLogged = false;
+
 export class JobScheduler {
   private queue?: Queue;
 
   constructor() {
     try {
-      this.queue = new Queue("devpulse", { connection: { url: env.REDIS_URL } });
+      const connection = new Redis(env.REDIS_URL, { maxRetriesPerRequest: null });
+      connection.on("error", (err) => {
+        if (!schedulerErrorLogged) {
+          logger.error(`Redis queue connection error: ${err.message} (subsequent connection errors will be silenced)`);
+          schedulerErrorLogged = true;
+        }
+      });
+      connection.on("connect", () => {
+        schedulerErrorLogged = false;
+        logger.info("Redis queue connected");
+      });
+      this.queue = new Queue("devpulse", { connection: connection as any });
     } catch (error) {
       logger.warn({ error }, "Redis queue unavailable; jobs will be persisted in PostgreSQL.");
     }

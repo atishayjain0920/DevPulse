@@ -12,29 +12,48 @@ export class AiService {
     const stored = userId
       ? await prisma.aISummary.findFirst({ where: { userId, summaryType: "Weekly" }, orderBy: { generatedAt: "desc" } })
       : null;
-    const kpis = await analyticsService.getEngineeringKpis(userId);
-    const [risks, users] = await Promise.all([
-      prisma.repositoryRisk.findMany({ where: { status: "open" }, orderBy: { detectedAt: "desc" }, take: 10 }),
-      prisma.user.findMany({ orderBy: { displayName: "asc" }, take: 10 })
-    ]);
+
+    if (stored && stored.content && stored.content.startsWith("{")) {
+      try {
+        return {
+          summaryType: "Weekly",
+          generatedAt: stored.generatedAt.toISOString(),
+          modelName: stored.modelName,
+          confidence: stored.confidence,
+          disclaimer,
+          sections: JSON.parse(stored.content)
+        };
+      } catch (e) {
+        logger.error({ error: e }, "Failed to parse stored weekly summary");
+      }
+    }
+
+    const context = await this.buildContext(userId);
+    const prompt = `Based on the following DevPulse context, generate a JSON weekly summary for the user's engineering team with these exact keys: overallProductivity, commitHighlights, prPerformance, buildHealth, repositoryHealth, topContributors, risks, achievements, recommendations. The values must be strings or arrays of strings. Return ONLY valid JSON, no markdown formatting. Context: ${JSON.stringify(context)}`;
+    
+    let contentStr = "";
+    try {
+      const response = await this.askProvider(prompt, context);
+      contentStr = response.replace(/```json/gi, '').replace(/```/g, '').trim();
+      JSON.parse(contentStr); // validate
+    } catch (e) {
+      logger.error({ error: e }, "Failed to generate weekly summary via Gemini");
+      contentStr = JSON.stringify({ overallProductivity: "Summary generation failed or insufficient data." });
+    }
+
+    if (userId) {
+      await prisma.aISummary.create({
+        data: { userId, summaryType: "Weekly", content: contentStr, modelName: env.AI_MODEL, confidence: 0.85 }
+      });
+    }
 
     return {
       summaryType: "Weekly",
-      generatedAt: stored?.generatedAt?.toISOString() ?? new Date().toISOString(),
-      modelName: stored?.modelName ?? env.AI_MODEL,
-      confidence: stored?.confidence ?? 0,
+      generatedAt: new Date().toISOString(),
+      modelName: env.AI_MODEL,
+      confidence: 0.85,
       disclaimer,
-      sections: {
-        overallProductivity: stored?.content ?? `Team productivity is ${kpis.productivityScore}/100 with ${kpis.activeContributors} active contributors.`,
-        commitHighlights: `The current analytics window contains ${kpis.repositoryCount} synced repositories.`,
-        prPerformance: `Average review time is ${kpis.reviewTime}; stale PR count is reflected in pull request analytics.`,
-        buildHealth: `Build success rate is ${kpis.buildSuccessRate}.`,
-        repositoryHealth: `Average repository health is ${kpis.repositoryHealth}/100.`,
-        topContributors: users.map((user) => user.displayName).join(", "),
-        risks: risks.map((risk) => risk.title),
-        achievements: [],
-        recommendations: (await this.recommendations()).map((recommendation) => recommendation.title)
-      }
+      sections: JSON.parse(contentStr)
     };
   }
 
@@ -42,12 +61,37 @@ export class AiService {
     const stored = userId
       ? await prisma.aISummary.findFirst({ where: { userId, summaryType: "Executive" }, orderBy: { generatedAt: "desc" } })
       : null;
-    const kpis = await analyticsService.getEngineeringKpis(userId);
+    
+    if (stored) {
+      return {
+        summaryType: "Executive",
+        generatedAt: stored.generatedAt.toISOString(),
+        disclaimer,
+        content: stored.content
+      };
+    }
+
+    const context = await this.buildContext(userId);
+    const prompt = `Based on the following DevPulse context, write a 2-3 paragraph executive summary of the engineering team's current status, focusing on KPIs, delivery bottlenecks, and major risks. Return ONLY the summary text. Context: ${JSON.stringify(context)}`;
+    
+    let contentStr = "Insufficient data to generate executive summary.";
+    try {
+      contentStr = await this.askProvider(prompt, context);
+    } catch (e) {
+      logger.error({ error: e }, "Failed to generate executive summary via Gemini");
+    }
+
+    if (userId) {
+      await prisma.aISummary.create({
+        data: { userId, summaryType: "Executive", content: contentStr, modelName: env.AI_MODEL, confidence: 0.85 }
+      });
+    }
+
     return {
       summaryType: "Executive",
-      generatedAt: stored?.generatedAt?.toISOString() ?? new Date().toISOString(),
+      generatedAt: new Date().toISOString(),
       disclaimer,
-      content: stored?.content ?? `Engineering delivery is currently measured at ${kpis.repositoryHealth}/100 repository health with ${kpis.buildSuccessRate} build success.`
+      content: contentStr
     };
   }
 
@@ -57,12 +101,40 @@ export class AiService {
     const stored = repository
       ? await prisma.aISummary.findFirst({ where: { summaryType: `Repository:${repository.id}` }, orderBy: { generatedAt: "desc" } })
       : null;
+    
+    if (stored) {
+      return {
+        repositoryId: repository?.id ?? repositoryId,
+        title: `${repository?.name ?? "Repository"} analytics summary`,
+        health,
+        disclaimer,
+        content: stored.content
+      };
+    }
+
+    const context = await this.buildContext(); // We can pass a filtered context later if needed
+    const repoData = context.repositories.find(r => r.id === repository?.id);
+    const prompt = `Based on the following repository data and overall context, write a concise 1-paragraph technical summary of the repository's health, recent activity, and risks. Return ONLY the summary text. Repository Data: ${JSON.stringify(repoData)}`;
+    
+    let contentStr = `${repository?.fullName ?? "This repository"} has a ${health.riskLevel.toLowerCase()} health rating with a score of ${health.overallScore}/100.`;
+    try {
+      contentStr = await this.askProvider(prompt, context);
+    } catch (e) {
+      logger.error({ error: e }, "Failed to generate repository summary via Gemini");
+    }
+
+    if (repository) {
+      await prisma.aISummary.create({
+        data: { userId: "system", summaryType: `Repository:${repository.id}`, content: contentStr, modelName: env.AI_MODEL, confidence: 0.85 }
+      });
+    }
+
     return {
       repositoryId: repository?.id ?? repositoryId,
       title: `${repository?.name ?? "Repository"} analytics summary`,
       health,
       disclaimer,
-      content: stored?.content ?? `${repository?.fullName ?? "This repository"} has a ${health.riskLevel.toLowerCase()} health rating with a score of ${health.overallScore}/100.`
+      content: contentStr
     };
   }
 
@@ -84,28 +156,6 @@ export class AiService {
   }
 
   async chat(question: string, userId?: string) {
-    const normalized = question.toLowerCase();
-    if (normalized.includes("active")) {
-      const repos = await prisma.repository.findMany({ include: { _count: { select: { commits: true } } }, orderBy: { commits: { _count: "desc" } }, take: 1 });
-      return { answer: repos[0] ? `${repos[0].fullName} is currently the most active repository by commit volume.` : "No repository activity has been synced yet.", links: repos[0] ? [`/repositories/${repos[0].id}`] : [], disclaimer };
-    }
-    if (normalized.includes("failed build") || normalized.includes("build failure")) {
-      const run = await prisma.workflowRun.findFirst({ where: { conclusion: "failure" }, include: { workflow: { include: { repository: true } } }, orderBy: { startedAt: "desc" } });
-      return { answer: run ? `${run.workflow.repository.fullName} has the most recent failed workflow run.` : "No failed workflow runs are present in the database.", links: run ? [`/repositories/${run.workflow.repositoryId}`] : [], disclaimer };
-    }
-    if (normalized.includes("stale pull") || normalized.includes("stale pr")) {
-      const prs = await prisma.pullRequest.count({ where: { state: "OPEN", createdAtGitHub: { lt: new Date(Date.now() - 48 * 36e5) } } });
-      return { answer: `${prs} open pull request(s) are older than 48 hours.`, links: ["/pull-requests?status=stale"], disclaimer };
-    }
-    if (normalized.includes("risk")) {
-      const risks = await this.risks();
-      return { answer: `${risks.length} open repository risk(s) are currently tracked.`, links: ["/repositories"], disclaimer };
-    }
-    if (normalized.includes("summarize")) {
-      const summary = await this.weeklySummary(userId);
-      return { answer: summary.sections.overallProductivity, links: ["/ai"], disclaimer };
-    }
-
     if (!(await this.hasSyncedProjectData())) {
       return { answer: "I could not find sufficient synced project data to answer that yet.", links: [], disclaimer };
     }

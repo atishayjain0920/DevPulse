@@ -24,3 +24,10 @@ securityRoutes.post("/mfa", asyncHandler(async (req, res) => {
   const recoveryCodes = Array.from({ length: 6 }, () => crypto.randomBytes(6).toString("hex").toUpperCase());
   ok(res, { mfaEnabled: true, recoveryCodes });
 }));
+securityRoutes.delete("/github", asyncHandler(async (req, res) => {
+  await prisma.gitHubAccount.deleteMany({ where: { userId: req.user!.id } });
+  await prisma.auditLog.create({
+    data: { userId: req.user!.id, action: "REVOKE_GITHUB", entity: "GitHubAccount" }
+  });
+  ok(res, { revoked: true });
+}));

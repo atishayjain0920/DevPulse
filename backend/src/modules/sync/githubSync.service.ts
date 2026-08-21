@@ -60,6 +60,9 @@ export class GitHubSyncService {
   }
 
   private async syncRepositoryFromGitHub(repository: GitHubRepository, token: string, userId: string) {
+    const existing = await prisma.repository.findUnique({ where: { githubRepositoryId: String(repository.id) } });
+    const since = existing?.syncedAt ?? undefined;
+
     const saved = await prisma.repository.upsert({
       where: { githubRepositoryId: String(repository.id) },
       create: {
@@ -106,10 +109,10 @@ export class GitHubSyncService {
     });
     await Promise.all([
       this.syncBranches(saved.id, repository.full_name, token),
-      this.syncCommits(saved.id, repository.full_name, token, userId),
+      this.syncCommits(saved.id, repository.full_name, token, userId, since),
       this.syncContributors(saved.id, repository.full_name, token),
       this.syncPullRequests(saved.id, repository.full_name, token, userId),
-      this.syncIssues(saved.id, repository.full_name, token),
+      this.syncIssues(saved.id, repository.full_name, token, since),
       this.syncReleases(saved.id, repository.full_name, token),
       this.syncWorkflows(saved.id, repository.full_name, token)
     ]);
@@ -125,41 +128,80 @@ export class GitHubSyncService {
     })));
   }
 
-  private async syncCommits(repositoryId: string, fullName: string, token: string, userId: string) {
-    const commits = await this.github<Array<{ sha: string; html_url?: string; commit: { message: string; author?: { date?: string } }; stats?: { additions: number; deletions: number; total: number }; files?: unknown[] }>>(`/repos/${fullName}/commits?per_page=30`, token).catch(() => []);
-    await Promise.all(commits.map((commit) => prisma.commit.upsert({
-      where: { commitSHA: commit.sha },
-      create: {
-        repositoryId,
-        authorId: userId,
-        commitSHA: commit.sha,
-        message: commit.commit.message,
-        additions: commit.stats?.additions ?? 0,
-        deletions: commit.stats?.deletions ?? 0,
-        totalChanges: commit.stats?.total ?? 0,
-        filesChanged: commit.files?.length ?? 0,
-        commitDate: date(commit.commit.author?.date) ?? new Date(),
-        url: commit.html_url
-      },
-      update: {
-        message: commit.commit.message,
-        additions: commit.stats?.additions ?? 0,
-        deletions: commit.stats?.deletions ?? 0,
-        totalChanges: commit.stats?.total ?? 0,
-        filesChanged: commit.files?.length ?? 0,
-        url: commit.html_url
+  private async syncCommits(repositoryId: string, fullName: string, token: string, fallbackUserId: string, since?: Date) {
+    const query = since ? `?per_page=100&since=${since.toISOString()}` : `?per_page=100`;
+    const commits = await this.github<Array<{ sha: string; html_url?: string; author?: { id?: number }; commit: { message: string; author?: { date?: string } }; stats?: { additions: number; deletions: number; total: number }; files?: unknown[] }>>(`/repos/${fullName}/commits${query}`, token).catch(() => []);
+    
+    for (const commit of commits) {
+      if (!commit.stats) {
+        try {
+          const detailed = await this.github<any>(`/repos/${fullName}/commits/${commit.sha}`, token);
+          commit.stats = detailed.stats;
+          commit.files = detailed.files;
+        } catch {
+          // Ignore failure for individual commit
+        }
       }
-    })));
+      
+      let authorId = fallbackUserId;
+      if (commit.author?.id) {
+        const ghIdStr = String(commit.author.id);
+        const account = await prisma.gitHubAccount.findFirst({ where: { githubUserId: ghIdStr } });
+        if (account) {
+          authorId = account.userId;
+        } else {
+          const u = await prisma.user.findFirst({ where: { githubId: ghIdStr } });
+          if (u) authorId = u.id;
+        }
+      }
+
+      await prisma.commit.upsert({
+        where: { commitSHA: commit.sha },
+        create: {
+          repositoryId,
+          authorId,
+          commitSHA: commit.sha,
+          message: commit.commit.message,
+          additions: commit.stats?.additions ?? 0,
+          deletions: commit.stats?.deletions ?? 0,
+          totalChanges: commit.stats?.total ?? 0,
+          filesChanged: commit.files?.length ?? 0,
+          commitDate: date(commit.commit.author?.date) ?? new Date(),
+          url: commit.html_url
+        },
+        update: {
+          authorId,
+          message: commit.commit.message,
+          additions: commit.stats?.additions ?? 0,
+          deletions: commit.stats?.deletions ?? 0,
+          totalChanges: commit.stats?.total ?? 0,
+          filesChanged: commit.files?.length ?? 0,
+          url: commit.html_url
+        }
+      });
+    }
   }
 
-  private async syncPullRequests(repositoryId: string, fullName: string, token: string, userId: string) {
-    const prs = await this.github<Array<{ number: number; title: string; body?: string | null; state: string; draft?: boolean; created_at: string; merged_at?: string | null; closed_at?: string | null; comments?: number; additions?: number; deletions?: number; changed_files?: number; html_url?: string }>>(`/repos/${fullName}/pulls?state=all&per_page=50`, token).catch(() => []);
+  private async syncPullRequests(repositoryId: string, fullName: string, token: string, fallbackUserId: string) {
+    const prs = await this.github<Array<{ number: number; title: string; body?: string | null; state: string; draft?: boolean; user?: { id?: number }; created_at: string; merged_at?: string | null; closed_at?: string | null; comments?: number; additions?: number; deletions?: number; changed_files?: number; html_url?: string }>>(`/repos/${fullName}/pulls?state=all&per_page=100&sort=updated&direction=desc`, token).catch(() => []);
     for (const pr of prs) {
+      let authorId = fallbackUserId;
+      if (pr.user?.id) {
+        const ghIdStr = String(pr.user.id);
+        const account = await prisma.gitHubAccount.findFirst({ where: { githubUserId: ghIdStr } });
+        if (account) {
+          authorId = account.userId;
+        } else {
+          const u = await prisma.user.findFirst({ where: { githubId: ghIdStr } });
+          if (u) authorId = u.id;
+        }
+      }
+
       const saved = await prisma.pullRequest.upsert({
         where: { repositoryId_githubPRNumber: { repositoryId, githubPRNumber: pr.number } },
         create: {
           repositoryId,
-          authorId: userId,
+          authorId,
           githubPRNumber: pr.number,
           title: pr.title,
           description: pr.body,
@@ -174,6 +216,7 @@ export class GitHubSyncService {
           url: pr.html_url
         },
         update: {
+          authorId,
           title: pr.title,
           description: pr.body,
           state: prState(pr),
@@ -192,21 +235,37 @@ export class GitHubSyncService {
 
   private async syncReviews(pullRequestId: string, fullName: string, prNumber: number, token: string) {
     const reviews = await this.github<Array<{ id: number; state: string; submitted_at?: string | null; user?: { id?: number; login?: string }; body?: string | null }>>(`/repos/${fullName}/pulls/${prNumber}/reviews?per_page=100`, token).catch(() => []);
-    await Promise.all(reviews.filter((review) => review.submitted_at).map((review) => prisma.pullRequestReview.upsert({
-      where: { id: String(review.id) },
-      create: {
-        id: String(review.id),
-        pullRequestId,
-        reviewState: review.state,
-        submittedAt: new Date(review.submitted_at!),
-        comments: review.body ? 1 : 0
-      },
-      update: {
-        reviewState: review.state,
-        submittedAt: new Date(review.submitted_at!),
-        comments: review.body ? 1 : 0
+    for (const review of reviews.filter((review) => review.submitted_at)) {
+      let reviewerId: string | undefined = undefined;
+      if (review.user?.id) {
+        const ghIdStr = String(review.user.id);
+        const account = await prisma.gitHubAccount.findFirst({ where: { githubUserId: ghIdStr } });
+        if (account) {
+          reviewerId = account.userId;
+        } else {
+          const u = await prisma.user.findFirst({ where: { githubId: ghIdStr } });
+          if (u) reviewerId = u.id;
+        }
       }
-    })));
+
+      await prisma.pullRequestReview.upsert({
+        where: { id: String(review.id) },
+        create: {
+          id: String(review.id),
+          pullRequestId,
+          reviewerId,
+          reviewState: review.state,
+          submittedAt: new Date(review.submitted_at!),
+          comments: review.body ? 1 : 0
+        },
+        update: {
+          reviewerId,
+          reviewState: review.state,
+          submittedAt: new Date(review.submitted_at!),
+          comments: review.body ? 1 : 0
+        }
+      });
+    }
   }
 
   private async syncContributors(repositoryId: string, fullName: string, token: string) {
@@ -218,8 +277,9 @@ export class GitHubSyncService {
     })));
   }
 
-  private async syncIssues(repositoryId: string, fullName: string, token: string) {
-    const issues = await this.github<Array<{ number: number; title: string; body?: string | null; state: string; user?: { login?: string }; labels?: Array<{ name?: string }>; comments?: number; created_at: string; updated_at?: string; closed_at?: string | null; html_url?: string; pull_request?: unknown }>>(`/repos/${fullName}/issues?state=all&per_page=50`, token).catch(() => []);
+  private async syncIssues(repositoryId: string, fullName: string, token: string, since?: Date) {
+    const query = since ? `?state=all&per_page=100&since=${since.toISOString()}` : `?state=all&per_page=100`;
+    const issues = await this.github<Array<{ number: number; title: string; body?: string | null; state: string; user?: { login?: string }; labels?: Array<{ name?: string }>; comments?: number; created_at: string; updated_at?: string; closed_at?: string | null; html_url?: string; pull_request?: unknown }>>(`/repos/${fullName}/issues${query}`, token).catch(() => []);
     await Promise.all(issues.filter((issue) => !issue.pull_request).map((issue) => prisma.issue.upsert({
       where: { repositoryId_githubIssueNumber: { repositoryId, githubIssueNumber: issue.number } },
       create: {
@@ -258,11 +318,17 @@ export class GitHubSyncService {
         update: { name: workflow.name, path: workflow.path, state: workflow.state }
       });
       const runs = await this.github<{ workflow_runs: Array<{ id: number; status: string; conclusion?: string | null; run_started_at?: string; created_at: string; updated_at?: string; head_branch?: string; head_sha?: string }> }>(`/repos/${fullName}/actions/workflows/${workflow.id}/runs?per_page=20`, token).catch(() => ({ workflow_runs: [] }));
-      await Promise.all(runs.workflow_runs.map((run) => prisma.workflowRun.upsert({
-        where: { id: String(run.id) },
-        create: { id: String(run.id), workflowId: saved.id, status: run.status, conclusion: run.conclusion, startedAt: date(run.run_started_at) ?? new Date(run.created_at), completedAt: date(run.updated_at), branch: run.head_branch, commitSHA: run.head_sha },
-        update: { status: run.status, conclusion: run.conclusion, completedAt: date(run.updated_at), branch: run.head_branch, commitSHA: run.head_sha }
-      })));
+      await Promise.all(runs.workflow_runs.map((run) => {
+        const started = date(run.run_started_at) ?? new Date(run.created_at);
+        const completed = date(run.updated_at);
+        const duration = started && completed ? Math.max(0, Math.round((completed.getTime() - started.getTime()) / 1000)) : null;
+
+        return prisma.workflowRun.upsert({
+          where: { id: String(run.id) },
+          create: { id: String(run.id), workflowId: saved.id, status: run.status, conclusion: run.conclusion, duration, startedAt: started, completedAt: completed, branch: run.head_branch, commitSHA: run.head_sha },
+          update: { status: run.status, conclusion: run.conclusion, duration, completedAt: completed, branch: run.head_branch, commitSHA: run.head_sha }
+        });
+      }));
     }
   }
 

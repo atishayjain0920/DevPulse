@@ -6,10 +6,10 @@ const dbDouble = {
   commit: { count: async () => 0 },
   pullRequest: { count: async () => 0, findMany: async (): Promise<Array<Record<string, unknown>>> => [] },
   pullRequestReview: { count: async () => 0 },
-  developerProfile: { findUnique: async () => null },
+  developerProfile: { findUnique: async () => null, upsert: async (args: any) => ({ ...args.create, ...args.update }) },
   workflowRun: { findMany: async (): Promise<Array<Record<string, unknown>>> => [] },
   repositoryRisk: { findMany: async (): Promise<Array<Record<string, unknown>>> => [] },
-  repositoryHealth: { findFirst: async () => null }
+  repositoryHealth: { findFirst: async () => null, create: async (args: any) => ({ ...args.data, id: "rh_test", calculatedAt: new Date() }) }
 };
 
 function installDbDouble() {

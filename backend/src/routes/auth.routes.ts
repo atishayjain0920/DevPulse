@@ -39,11 +39,11 @@ authRoutes.get("/github/callback", asyncHandler(async (req, res) => {
   const refreshToken = signRefreshToken(user);
   await githubAuthService.storeRefreshToken(user.id, refreshToken, crypto.randomUUID());
   const sync = await githubSyncService.syncUser(user.id);
-  res.cookie("accessToken", accessToken, { httpOnly: true, sameSite: "lax", secure: env.NODE_ENV === "production" });
-  res.cookie("refreshToken", refreshToken, { httpOnly: true, sameSite: "lax", secure: env.NODE_ENV === "production" });
+  res.cookie("accessToken", accessToken, { httpOnly: true, sameSite: "lax", secure: env.NODE_ENV === "production", maxAge: 15 * 60 * 1000 });
+  res.cookie("refreshToken", refreshToken, { httpOnly: true, sameSite: "lax", secure: env.NODE_ENV === "production", maxAge: 7 * 24 * 60 * 60 * 1000 });
   res.clearCookie("githubOAuthState");
   if (req.header("accept")?.includes("text/html")) {
-    res.redirect(`${env.FRONTEND_ORIGIN.replace(/\/$/, "")}/dashboard`);
+    res.redirect(`${env.FRONTEND_ORIGIN.replace(/\/$/, "")}/app/dashboard`);
     return;
   }
   ok(res, { user, accessToken, mfaRequired: false, trustedDevice: true, sync });
@@ -66,8 +66,8 @@ authRoutes.post("/refresh", asyncHandler(async (req, res) => {
   const accessToken = signAccessToken(authUser);
   const nextRefreshToken = signRefreshToken(authUser);
   await githubAuthService.rotateRefreshToken(refreshToken, nextRefreshToken, user.id);
-  res.cookie("accessToken", accessToken, { httpOnly: true, sameSite: "lax", secure: env.NODE_ENV === "production" });
-  res.cookie("refreshToken", nextRefreshToken, { httpOnly: true, sameSite: "lax", secure: env.NODE_ENV === "production" });
+  res.cookie("accessToken", accessToken, { httpOnly: true, sameSite: "lax", secure: env.NODE_ENV === "production", maxAge: 15 * 60 * 1000 });
+  res.cookie("refreshToken", nextRefreshToken, { httpOnly: true, sameSite: "lax", secure: env.NODE_ENV === "production", maxAge: 7 * 24 * 60 * 60 * 1000 });
   ok(res, { accessToken });
 }));
 

@@ -45,6 +45,7 @@ model User {
   role                Role                 @relation(fields: [roleId], references: [id])
   sessions            UserSession[]
   userSettings        UserSettings?
+  metricSnapshots     DeveloperMetricSnapshot[]
 
   @@index([organizationId])
   @@index([roleId])
@@ -121,6 +122,7 @@ model Repository {
   syncJobs           SyncJob[]
   webhookEvents      WebhookEvent[]
   workflows          Workflow[]
+  metricSnapshots    RepositoryMetricSnapshot[]
 
   @@index([organizationId])
   @@index([language])
@@ -566,4 +568,35 @@ enum RiskSeverity {
   MEDIUM
   HIGH
   CRITICAL
+}
+
+model RepositoryMetricSnapshot {
+  id               String     @id @default(uuid())
+  repositoryId     String
+  overallScore     Int
+  activityScore    Int
+  reviewScore      Int
+  buildScore       Int
+  codeQualityScore Int
+  openIssues       Int
+  stalePrs         Int
+  activeRisks      Int
+  recordedAt       DateTime   @default(now())
+  repository       Repository @relation(fields: [repositoryId], references: [id])
+
+  @@index([repositoryId, recordedAt])
+}
+
+model DeveloperMetricSnapshot {
+  id                  String   @id @default(uuid())
+  userId              String
+  productivityScore   Int
+  commitActivity      Int
+  prScore             Int
+  reviewScore         Int
+  consistency         Int
+  recordedAt          DateTime @default(now())
+  user                User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, recordedAt])
 }

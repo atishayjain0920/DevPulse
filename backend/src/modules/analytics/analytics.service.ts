@@ -16,9 +16,48 @@ function hoursBetween(from?: Date | null, to?: Date | null): number | null {
   return Math.max(0, Math.round((to.getTime() - from.getTime()) / 36e5));
 }
 
+export interface AnalyticsFilter {
+  repositoryId?: string;
+  developerId?: string;
+  organizationId?: string;
+  from?: Date;
+  to?: Date;
+  branch?: string;
+  workflow?: string;
+}
+
+function buildCommitWhere(filter?: AnalyticsFilter) {
+  const where: any = {};
+  if (filter?.repositoryId) where.repositoryId = filter.repositoryId;
+  if (filter?.developerId) where.authorId = filter.developerId;
+  if (filter?.organizationId) where.repository = { organizationId: filter.organizationId };
+  if (filter?.from || filter?.to) {
+    where.commitDate = {};
+    if (filter.from) where.commitDate.gte = new Date(filter.from);
+    if (filter.to) where.commitDate.lte = new Date(filter.to);
+  }
+  return where;
+}
+
+function buildPRWhere(filter?: AnalyticsFilter) {
+  const where: any = {};
+  if (filter?.repositoryId) where.repositoryId = filter.repositoryId;
+  if (filter?.developerId) where.authorId = filter.developerId;
+  if (filter?.organizationId) where.repository = { organizationId: filter.organizationId };
+  if (filter?.from || filter?.to) {
+    where.createdAtGitHub = {};
+    if (filter.from) where.createdAtGitHub.gte = new Date(filter.from);
+    if (filter.to) where.createdAtGitHub.lte = new Date(filter.to);
+  }
+  return where;
+}
+
 export class AnalyticsService {
-  async getCommitSummary() {
-    const commits = await prisma.commit.findMany({ select: { additions: true, deletions: true, totalChanges: true, commitDate: true } });
+  async getCommitSummary(filter?: AnalyticsFilter) {
+    const commits = await prisma.commit.findMany({
+      where: buildCommitWhere(filter),
+      select: { additions: true, deletions: true, totalChanges: true, commitDate: true }
+    });
     const additions = commits.reduce((sum, commit) => sum + commit.additions, 0);
     const deletions = commits.reduce((sum, commit) => sum + commit.deletions, 0);
     const buckets = new Map<string, number>();
@@ -46,8 +85,12 @@ export class AnalyticsService {
     };
   }
 
-  async getCommitTrend() {
-    const commits = await prisma.commit.findMany({ select: { commitDate: true }, orderBy: { commitDate: "asc" } });
+  async getCommitTrend(filter?: AnalyticsFilter) {
+    const commits = await prisma.commit.findMany({
+      where: buildCommitWhere(filter),
+      select: { commitDate: true },
+      orderBy: { commitDate: "asc" }
+    });
     const buckets = new Map<string, number>();
     commits.forEach((commit) => {
       const key = commit.commitDate.toISOString().slice(0, 10);
@@ -56,8 +99,8 @@ export class AnalyticsService {
     return Array.from(buckets.entries()).map(([date, count]) => ({ date, commits: count }));
   }
 
-  async getHeatmap() {
-    const trend = await this.getCommitTrend();
+  async getHeatmap(filter?: AnalyticsFilter) {
+    const trend = await this.getCommitTrend(filter);
     return trend.map((point) => ({
       date: point.date,
       count: point.commits,
@@ -65,12 +108,20 @@ export class AnalyticsService {
     }));
   }
 
-  async getChurn() {
+  async getChurn(filter?: AnalyticsFilter) {
+    const whereRepo: any = {};
+    if (filter?.repositoryId) whereRepo.id = filter.repositoryId;
+    if (filter?.organizationId) whereRepo.organizationId = filter.organizationId;
+
     const repositories = await prisma.repository.findMany({
+      where: whereRepo,
       select: {
         id: true,
         name: true,
-        commits: { select: { additions: true, deletions: true } }
+        commits: {
+          where: buildCommitWhere(filter),
+          select: { additions: true, deletions: true }
+        }
       },
       orderBy: { fullName: "asc" }
     });
@@ -82,8 +133,11 @@ export class AnalyticsService {
     }));
   }
 
-  async getPullRequestStatistics() {
-    const pullRequests = await prisma.pullRequest.findMany({ include: { reviews: true } });
+  async getPullRequestStatistics(filter?: AnalyticsFilter) {
+    const pullRequests = await prisma.pullRequest.findMany({
+      where: buildPRWhere(filter),
+      include: { reviews: true }
+    });
     const open = pullRequests.filter((pr) => pr.state === "OPEN").length;
     const merged = pullRequests.filter((pr) => pr.state === "MERGED").length;
     const closed = pullRequests.filter((pr) => pr.state === "CLOSED").length;
@@ -96,7 +150,7 @@ export class AnalyticsService {
       merged,
       closed,
       draft,
-      rejected: 0,
+      rejected: closed,
       approvalRate: pct(pullRequests.filter((pr) => pr.reviews.some((review) => review.reviewState.toLowerCase() === "approved")).length, pullRequests.length),
       mergeSuccessRate: pct(merged, pullRequests.length),
       averageReviewTime: avg(reviewTimes),
@@ -134,13 +188,21 @@ export class AnalyticsService {
       prisma.pullRequestReview.count({ where: { reviewerId: userId } }),
       prisma.developerProfile.findUnique({ where: { userId } })
     ]);
-    if (profile?.productivityScore) return profile.productivityScore;
+    if (profile?.productivityScore && profile.lastCalculated > new Date(Date.now() - 24 * 36e5)) return profile.productivityScore;
 
     const commitActivity = Math.min(100, commits * 7);
     const prScore = Math.min(100, prs * 25);
     const reviewScore = Math.min(100, reviews * 12);
     const consistency = commits > 8 ? 90 : commits > 0 ? 70 : 0;
-    return Math.round(commitActivity * 0.35 + prScore * 0.25 + reviewScore * 0.2 + consistency * 0.2);
+    const score = Math.round(commitActivity * 0.35 + prScore * 0.25 + reviewScore * 0.2 + consistency * 0.2);
+
+    await prisma.developerProfile.upsert({
+      where: { userId },
+      create: { userId, productivityScore: score, totalCommits: commits, totalPRs: prs, totalReviews: reviews, lastCalculated: new Date() },
+      update: { productivityScore: score, totalCommits: commits, totalPRs: prs, totalReviews: reviews, lastCalculated: new Date() }
+    });
+
+    return score;
   }
 
   async calculateRepositoryHealth(repositoryId: string) {
@@ -151,7 +213,10 @@ export class AnalyticsService {
       prisma.commit.count({ where: { repositoryId } }),
       prisma.repositoryHealth.findFirst({ where: { repositoryId }, orderBy: { calculatedAt: "desc" } })
     ]);
-    if (!runs.length && !pullRequests.length && !risks.length && !commitCount && stored) return stored;
+    if (stored && stored.calculatedAt > new Date(Date.now() - 24 * 36e5)) {
+      return { ...stored, calculatedAt: stored.calculatedAt.toISOString() };
+    }
+    if (!runs.length && !pullRequests.length && !risks.length && !commitCount && stored) return { ...stored, calculatedAt: stored.calculatedAt.toISOString() };
 
     const buildSuccess = runs.length ? pct(runs.filter((run) => run.conclusion === "success").length, runs.length) : 0;
     const openPrBacklog = pullRequests.filter((pr) => pr.state === "OPEN").length;
@@ -161,7 +226,7 @@ export class AnalyticsService {
     const codeQualityScore = Math.max(0, 100 - riskPenalty);
     const score = Math.max(0, Math.min(100, Math.round(buildSuccess * 0.3 + commitActivity * 0.25 + reviewScore * 0.25 + codeQualityScore * 0.2)));
 
-    return {
+    const healthData = {
       repositoryId,
       overallScore: score,
       activityScore: commitActivity,
@@ -169,9 +234,12 @@ export class AnalyticsService {
       buildScore: buildSuccess,
       deploymentScore: runs.length ? buildSuccess : 0,
       codeQualityScore,
-      riskLevel: score >= 90 ? "Excellent" : score >= 75 ? "Healthy" : score >= 50 ? "Needs Attention" : "Critical",
-      calculatedAt: new Date().toISOString()
+      riskLevel: score >= 90 ? "Excellent" : score >= 75 ? "Healthy" : score >= 50 ? "Needs Attention" : "Critical"
     };
+
+    const saved = await prisma.repositoryHealth.create({ data: healthData });
+
+    return { ...saved, calculatedAt: saved.calculatedAt.toISOString() };
   }
 
   async getEngineeringKpis(userId?: string) {

@@ -17,7 +17,19 @@ const filters = z.object({
   to: z.string().optional()
 });
 
-analyticsRoutes.get("/commits", validate("query", filters), asyncHandler(async (_req, res) => ok(res, await analyticsService.getCommitSummary())));
-analyticsRoutes.get("/commits/trend", validate("query", filters), asyncHandler(async (_req, res) => ok(res, await analyticsService.getCommitTrend())));
-analyticsRoutes.get("/commits/heatmap", validate("query", filters), asyncHandler(async (_req, res) => ok(res, await analyticsService.getHeatmap())));
-analyticsRoutes.get("/commits/churn", validate("query", filters), asyncHandler(async (_req, res) => ok(res, await analyticsService.getChurn())));
+analyticsRoutes.get("/commits", validate("query", filters), asyncHandler(async (req, res) => {
+  const queryFilter = req.query as any;
+  ok(res, await analyticsService.getCommitSummary(queryFilter));
+}));
+analyticsRoutes.get("/commits/trend", validate("query", filters), asyncHandler(async (req, res) => {
+  const queryFilter = req.query as any;
+  ok(res, await analyticsService.getCommitTrend(queryFilter));
+}));
+analyticsRoutes.get("/commits/heatmap", validate("query", filters), asyncHandler(async (req, res) => {
+  const queryFilter = req.query as any;
+  ok(res, await analyticsService.getHeatmap(queryFilter));
+}));
+analyticsRoutes.get("/commits/churn", validate("query", filters), asyncHandler(async (req, res) => {
+  const queryFilter = req.query as any;
+  ok(res, await analyticsService.getChurn(queryFilter));
+}));

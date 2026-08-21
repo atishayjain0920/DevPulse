@@ -13,6 +13,7 @@ import { requestContext } from "./middleware/requestContext.js";
 import { openApiSpec } from "./openapi.js";
 import { apiRoutes } from "./routes/index.js";
 import { ok } from "./shared/apiResponse.js";
+import path from "path";
 
 export function createApp() {
   const app = express();
@@ -29,6 +30,7 @@ export function createApp() {
   });
 
   app.get("/health", (_req, res) => ok(res, { status: "ok", service: "devpulse-api", version: "1.0.0" }));
+  app.use("/reports", express.static(path.join(process.cwd(), "reports")));
   app.use("/docs", swaggerUi.serve, swaggerUi.setup(openApiSpec));
   app.use("/api/v1", apiRoutes);
   app.use(notFoundHandler);
